@@ -1,0 +1,49 @@
+name: SwapDevTestSlots
+
+on: workflow_dispatch
+
+jobs:
+    swapstagingandproduction:
+        name: "Swap Staging and DevTest Slots"
+        runs-on: ubuntu-latest
+        # READ.ME for https://github.com/chrnorm/deployment-action and https://github.com/chrnorm/deployment-status states that the workflow must be granted write access to deployments otherwise action will fail
+        #permissions:           
+        #    deployments: write
+            
+        steps:
+            - name: 'Checkout'
+              uses: actions/checkout@v3
+
+            - name: 'Login via Azure CLI'
+              uses: azure/login@v1
+              with:
+                  creds: ${{ secrets.DEVTEST_AZURE_CREDENTIALS }}
+
+            - uses: chrnorm/deployment-action@v2
+              name: Create GitHub Deployment
+              id: deployment
+              with:
+                  token: "${{ github.token }}"
+                  environment: QA
+
+            - name: 'Swap slots'
+              uses: azure/CLI@v1
+              with:
+                  inlineScript: |
+                      az webapp deployment slot swap -n fs-campaignservice-dev -g FSV4-AppServicePlans-Dev --slot staging --target-slot production
+
+            - name: Update deployment status (success)
+              if: success()
+              uses: chrnorm/deployment-status@v2
+              with:
+                  token: "${{ github.token }}"
+                  state: "success"
+                  deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+
+            - name: Update deployment status (failure)
+              if: failure()
+              uses: chrnorm/deployment-status@v2
+              with:
+                  token: "${{ github.token }}"
+                  state: "failure"
+                  deployment-id: ${{ steps.deployment.outputs.deployment_id }}

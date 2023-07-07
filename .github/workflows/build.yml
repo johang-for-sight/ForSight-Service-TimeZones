@@ -1,0 +1,49 @@
+name: BuildAndTest
+
+on:
+  push:
+    branches:
+        - master
+        - develop
+  pull_request:
+      branches:
+        - master
+        - develop
+jobs:
+  build:
+      name: "Build"
+      runs-on: ubuntu-latest
+      steps:
+          - uses: actions/checkout@v3
+
+          - name: Setup .NET
+            uses: actions/setup-dotnet@v3
+            with:
+                dotnet-version: '6.0.x'
+
+          #- name: Install Sonarcloud scanner
+          #  run: dotnet tool install --global dotnet-sonarscanner
+
+          - name: Update NuGet sources
+            run: |
+                dotnet nuget add source ${{ env.SOURCE_URL }} --name ForthCom --username forthcomadmin --password ${{ secrets.GH_PACKAGES }} --store-password-in-clear-text
+            env:
+                SOURCE_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+          - name: Restore dependencies
+            run: dotnet restore
+
+          #- name: Begin sonarscanner
+          #  run: |
+          #     dotnet sonarscanner begin /k:"${{ github.repository_owner }}_${{ github.event.repository.name }}" /d:sonar.login=${{ secrets.SONAR_TOKEN }} /o:"${{ secrets.SONAR_ORGANISATION_KEY }}" /d:sonar.cs.opencover.reportsPaths=**/*.opencover.xml /d:sonar.cs.vstest.reportsPath=**/*.trx /d:sonar.host.url="https://sonarcloud.io"
+
+          - name: Build
+            run: dotnet build --no-restore
+
+          - name: Test
+            run: dotnet test --no-build --verbosity normal #/p:CollectCoverage=true /p:CoverletOutputFormat=opencover --logger trx
+            
+          #- name: End sonarscanner
+          #  run: dotnet sonarscanner end /d:sonar.login="${{ secrets.SONAR_TOKEN }}"
+          #  env:
+          #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

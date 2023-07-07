@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForSight.Authorization" Version="1.3.2" />
+    <PackageReference Include="ForSight.Messaging" Version="1.1.0" />
+    <PackageReference Include="ForSight.Utils" Version="1.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Authorization" Version="7.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+    <PackageReference Include="NodaTime" Version="3.1.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ForSight.TimeZonesService.Core\ForSight.TimezonesService.Core.csproj" />
+    <ProjectReference Include="..\ForSight.TimeZonesService.Data\ForSight.TimeZonesService.Data.csproj" />
+  </ItemGroup>
+
+</Project>

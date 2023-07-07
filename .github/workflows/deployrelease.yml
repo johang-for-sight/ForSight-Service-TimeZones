@@ -1,0 +1,113 @@
+name: DeployRelease
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deployprodcontainerimage:
+      name: "Prod"
+      runs-on: ubuntu-latest
+      steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v3
+
+      - name: 'Login via Azure CLI'
+        uses: azure/login@v1
+        with:
+            creds: ${{ secrets.PROD_AZURE_CREDENTIALS }}
+
+      - name: 'Docker login'
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.PROD_REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.PROD_TF_CLIENT_ID }}
+          password: ${{ secrets.PROD_TF_CLIENT_SECRET }}
+
+      - name: 'Get Container Image Name'
+        id: containerimage
+        run: |
+          IMAGE_NAME=${{ github.ref }}
+          IMAGE_NAME="${IMAGE_NAME/refs\/tags\//}"          
+          echo "imagename=$IMAGE_NAME" >> $GITHUB_OUTPUT
+
+      - name: 'Docker build and push'
+        env:
+          container_image: ${{ secrets.PROD_REGISTRY_LOGIN_SERVER }}/campaignservice:${{ steps.containerimage.outputs.imagename }}
+        run: |
+          docker build -t ${{ env.container_image }} -f ./ForSight.CampaignService.API/Dockerfile --build-arg PRIVATE_NUGET_SOURCE_URL=https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --build-arg PRIVATE_NUGET_PASSWD=${{ secrets.GH_PACKAGES }} .
+          docker push ${{ env.container_image }}
+
+  deployimagetoappservice:
+      name: "Deploy Container Image"
+      runs-on: ubuntu-latest
+      needs: deployprodcontainerimage
+      env:
+          RABBITMQ__ENABLED: false
+          OUTBOX__ENABLED: false
+      steps:
+          - name: 'Checkout'
+            uses: actions/checkout@v3
+
+          - name: 'Login via Azure CLI'
+            uses: azure/login@v1
+            with:
+                creds: ${{ secrets.PROD_AZURE_CREDENTIALS }}
+          
+          - name: 'Get ConnectionString from KeyVault'
+            id: getCampaignServiceConnectionStringSecret
+            uses: azure/cli@v1
+            with:
+                inlineScript: |
+                    echo "connectionString=$(az keyvault secret show --vault-name ${{ secrets.PROD_KEY_VAULT }} --name campaignServiceDefaultConnection --query value -o tsv)" >> $GITHUB_OUTPUT            
+
+          - name: Setup .NET
+            uses: actions/setup-dotnet@v3
+            with:
+                dotnet-version: '6.0.x'
+
+          -  name: Update NuGet sources
+             run: |
+                 dotnet nuget add source ${{ env.SOURCE_URL }} --name ForthCom --username forthcomadmin --password ${{ secrets.GH_PACKAGES }} --store-password-in-clear-text
+             env:
+                 SOURCE_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+          - name: Restore dependencies
+            run: dotnet restore
+
+          - name: Build
+            run: dotnet build --no-restore
+
+          - name: 'Install EF'
+            run: dotnet tool install --global dotnet-ef
+
+          - name: 'Generate SQL scripts'
+            working-directory: ./ForSight.CampaignService.Data
+            run: dotnet ef migrations script --output ./sql/campaign-service-migration-script.sql --idempotent --context CampaignServiceDbContext --startup-project ../ForSight.CampaignService.API --no-build
+
+          - name: 'Get Container Image Name'
+            id: containerimage
+            run: |
+                IMAGE_NAME=${{ github.ref }}
+                IMAGE_NAME="${IMAGE_NAME/refs\/tags\//}"                
+                echo "imagename=$IMAGE_NAME" >> $GITHUB_OUTPUT
+
+          - name: Set current date step
+            id: date            
+            run: echo "date=$(date '+%Y%m%d')" >> $GITHUB_OUTPUT
+
+          - name: 'Upload SQL script artifact'
+            uses: actions/upload-artifact@v3
+            with:
+                name: CampaignService_Prod_MigrationScript_${{ steps.containerimage.outputs.imagename }}_${{ steps.date.outputs.date }}
+                path: ForSight.CampaignService.Data/sql/campaign-service-migration-script.sql
+
+          - name: 'Update Database'
+            working-directory: ./ForSight.CampaignService.Data
+            run: dotnet ef database update --context CampaignServiceDbContext --startup-project ../ForSight.CampaignService.API --connection "${{ steps.getCampaignServiceConnectionStringSecret.outputs.connectionString }}" --no-build
+
+          - name: 'Deploy image'
+            uses: azure/CLI@v1
+            with:
+                inlineScript: |
+                    az webapp config container set -n fs-campaignservice -g FSV4-AppServicePlans --docker-custom-image-name ${{ secrets.PROD_REGISTRY_LOGIN_SERVER }}/campaignservice:${{ steps.containerimage.outputs.imagename }} --docker-registry-server-url ${{ secrets.PROD_REGISTRY_LOGIN_SERVER }} -s staging

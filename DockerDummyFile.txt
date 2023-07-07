@@ -1,0 +1,2 @@
+DummyFile to allow COPY to work with not always there files.
+This was added for the mkcert work.
